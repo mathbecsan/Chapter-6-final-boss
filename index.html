@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070208" />
+    <title>Black Knife — Neon Survival</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <header>
+        <div><span class="eyebrow">NEON SURVIVAL</span><h1>BLACK KNIFE</h1></div>
+        <button id="mute" class="icon-button" aria-label="Mute sound">SOUND ON</button>
+      </header>
+
+      <section class="stage-wrap" aria-label="Black Knife game">
+        <canvas id="game" width="960" height="540"></canvas>
+        <div id="menu" class="overlay">
+          <div class="menu-card">
+            <p class="kicker">A RHYTHM BULLET-HELL</p>
+            <h2>BLACK <span>KNIFE</span></h2>
+            <p class="intro">Survive the Knight's four attack phases. Dash through danger, follow the warnings, and hold your nerve.</p>
+            <div class="settings">
+              <fieldset><legend>DIFFICULTY</legend><div class="segmented" id="difficulty">
+                <button data-value="low">LOW · 18 HP</button><button class="active" data-value="casual">CASUAL · 12 HP</button><button data-value="hard">HARD · 6 HP</button>
+              </div></fieldset>
+              <fieldset><legend>CAMERA SHAKE</legend><div class="segmented" id="shake"><button class="active" data-value="on">ON</button><button data-value="off">OFF</button></div></fieldset>
+              <fieldset><legend>FLASHING LIGHTS</legend><div class="segmented" id="flash"><button data-value="on">ON</button><button class="active" data-value="off">OFF</button></div></fieldset>
+            </div>
+            <button id="start" class="start-button">ENTER THE BATTLE <span>→</span></button>
+            <p class="controls"><b>MOVE</b> WASD / ARROWS <i></i> <b>DASH</b> SPACE / X</p>
+          </div>
+        </div>
+        <div id="result" class="overlay hidden"><div class="result-card"><p id="result-kicker" class="kicker"></p><h2 id="result-title"></h2><p id="result-copy"></p><button id="again" class="start-button">PLAY AGAIN <span>↻</span></button></div></div>
+      </section>
+      <footer><span>ORIGINAL BROWSER RECREATION</span><span>Inspired by Just Shapes & Beats and DELTARUNE</span></footer>
+    </main>
+    <script type="module" src="/src/game.js"></script>
+  </body>
+</html>
