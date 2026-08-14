@@ -41,6 +41,11 @@ export default class Player {
     return true;
   }
 
+  // Full shield refill — granted at every phase transition as a reward
+  rechargeShields() {
+    this.shieldCharges = PLAYER.shieldCharges;
+  }
+
   get shielded() { return this.shieldTime > 0; }
   get vulnerable() { return !this.dead && this.invuln <= 0 && !this.shielded; }
 
