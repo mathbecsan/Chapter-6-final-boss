@@ -35,11 +35,24 @@ export default class BossScene extends Phaser.Scene {
       color: '#43e9ff', stroke: '#03202a', strokeThickness: 5,
     }).setOrigin(0.5).setDepth(DEPTHS.overlay).setVisible(false);
 
+    // Shield is also latched from a DOM keydown: Phaser can miss a tap that
+    // starts and ends between two frames, and with only 3 charges every
+    // press has to count.
+    this.shieldRequested = false;
+    this._shieldKeyHandler = e => {
+      if (['x', 'X', 'c', 'C', 'l', 'L'].includes(e.key)) this.shieldRequested = true;
+    };
+    window.addEventListener('keydown', this._shieldKeyHandler);
+
     window.__startBattle = () => this.beginIntro();
     window.__battleScene = this;
     window.__pauseBattle = () => this.pauseBattle();
     window.__resumeBattle = () => this.resumeBattle();
-    this.events.on('shutdown', () => { window.__startBattle = null; window.__battleScene = null; window.__pauseBattle = null; window.__resumeBattle = null; });
+    this.events.on('shutdown', () => {
+      window.removeEventListener('keydown', this._shieldKeyHandler);
+      window.__startBattle = null; window.__battleScene = null;
+      window.__pauseBattle = null; window.__resumeBattle = null;
+    });
   }
 
   // ---------- pause ----------
@@ -101,6 +114,7 @@ export default class BossScene extends Phaser.Scene {
     this.sideClock = 0;
     this.signalRed = false;
     this._beamRepeated = false;
+    this.suppressSide = false;
 
     this.player = new Player(this);
     this.boss = new Boss(this);
@@ -131,7 +145,7 @@ export default class BossScene extends Phaser.Scene {
           this.boss.state = 'battle';
           this.stateFlag = 'play';
           this.decisionClock = 0.7;
-          this.showHint('X / C = SHIELD (1.5s)  —  ONLY 3 FOR THE WHOLE BATTLE.  SPEND THEM WISELY.');
+          this.showHint('X / C = SHIELD (1.5s)  —  3 CHARGES, REFILLED EVERY PHASE YOU BREAK.');
         });
       });
     });
@@ -390,14 +404,19 @@ export default class BossScene extends Phaser.Scene {
     const walls = phase >= 3 ? 2 : 1;
     this.boss.playAnim('magic');
     this.playSfx('wall', 1);
-    const gapH = [150, 134, 120, 108, 96][phase];
-    const speed = 230 + phase * 35;
+    // Fairness pass: gaps are wide enough to fly through comfortably, the
+    // gap position is marked with a bright chevron on the right edge, and the
+    // drift is gentle enough to ride. Slightly faster to compensate.
+    const gapH = [200, 186, 172, 160, 148][phase];
+    const speed = 245 + phase * 38;
     for (let wnum = 0; wnum < walls; wnum += 1) {
       this.time.delayedCall(wnum * 1500, () => {
         if (this.stateFlag !== 'play') return;
-        let gapY = Phaser.Math.Between(120, H - 120);
-        const drift = (wnum % 2 === 0 ? 1 : -1) * (26 + phase * 10);
+        let gapY = Phaser.Math.Between(130, H - 130);
+        const drift = (wnum % 2 === 0 ? 1 : -1) * (20 + phase * 6);
         this.warnings.push({ kind: 'wallwarn', life: 0.7, max: 0.7 });
+        // Pre-show where the gap will be
+        this.warnings.push({ kind: 'gapmark', y: gapY, h: gapH, life: 0.7, max: 0.7 });
         this.playSfx('wall', 0.8);
         this.time.delayedCall(700, () => {
           if (this.stateFlag !== 'play') return;
@@ -405,11 +424,13 @@ export default class BossScene extends Phaser.Scene {
           for (let c = 0; c < cols; c += 1) {
             this.time.delayedCall(c * 240, () => {
               if (this.stateFlag !== 'play') return;
-              gapY = Phaser.Math.Clamp(gapY + drift * 0.24 * 10, 90, H - 90);
+              gapY = Phaser.Math.Clamp(gapY + drift * 0.24 * 10, 110, H - 110);
               for (let y = 40; y < H - 10; y += 46) {
                 if (Math.abs(y - gapY) < gapH / 2) continue;
                 this.spawnEnemyShot(W + 30, y, -speed, 0, 'ticket');
               }
+              // Live marker tracking the drifting gap
+              this.warnings.push({ kind: 'gapmark', y: gapY, h: gapH, life: 0.45, max: 0.45 });
               this.playSfx('ticket', 0.35);
             });
           }
@@ -419,32 +440,49 @@ export default class BossScene extends Phaser.Scene {
     this.time.delayedCall(walls * 1500 + 700 + 7 * 240 + (W / speed) * 1000 * 0.55, () => this.endAttack(1.5));
   }
 
-  // EYE BEAM: sustained beam that tracks the player vertically
+  // EYE BEAM: sustained beam that tracks the player vertically.
+  // Fairness contract (like the pink slashes): the eye charges visibly, then
+  // the beam's exact row LOCKS and is telegraphed as a green band before it
+  // fires. It fires exactly on that band, holds still for a grace beat, and
+  // only then starts steering toward you. Ambient lasers are silenced while
+  // a beam attack runs so nothing else fires unannounced on top of it.
   eyeBeamAttack() {
     const phase = this.boss.phase;
     this.boss.playAnim('magic');
     this.eyeGlow();
     this.playSfx('beam-charge', 1);
+    this.suppressSide = true;
     const e = this.boss.eyePos();
-    this.warnings.push({ kind: 'beamwarn', y: e.y, life: 0.9, max: 0.9 });
-    this.time.delayedCall(900, () => {
+    // Stage 1 (0.6s): eye visibly charges — no row is committed yet
+    this.warnings.push({ kind: 'beamwarn', y: e.y, life: 0.6, max: 0.6 });
+    this.time.delayedCall(600, () => {
       if (this.stateFlag !== 'play') return;
-      this.playSfx('beam-fire', 1);
-      if (this.settings.shake) this.cameras.main.shake(200, 0.008);
-      this.beams.push({
-        horizontal: true, y: this.player.y, life: 1.6 + phase * 0.2, width: 17,
-        track: 90 + phase * 25,
-      });
-      const again = phase >= 2;
-      this.time.delayedCall((1.6 + phase * 0.2) * 1000 + 300, () => {
+      // Stage 2 (0.6s): LOCK the row where the player is NOW and telegraph it
+      const lockY = Phaser.Math.Clamp(this.player.y, 70, H - 50);
+      this.warnings.push({ kind: 'beamlock', y: lockY, life: 0.6, max: 0.6 });
+      this.playSfx('wall', 0.5);
+      this.time.delayedCall(600, () => {
         if (this.stateFlag !== 'play') return;
-        if (again && !this._beamRepeated) {
-          this._beamRepeated = true;
-          this.eyeBeamAttack();
-        } else {
-          this._beamRepeated = false;
-          this.endAttack(1.4);
-        }
+        this.playSfx('beam-fire', 1);
+        if (this.settings.shake) this.cameras.main.shake(200, 0.008);
+        const life = 1.8 + phase * 0.2;
+        this.beams.push({
+          horizontal: true, y: lockY, life, width: 17,
+          track: 100 + phase * 25,
+          trackDelay: 0.45, // grace beat before it starts steering
+        });
+        const again = phase >= 2;
+        this.time.delayedCall(life * 1000 + 350, () => {
+          if (this.stateFlag !== 'play') return;
+          if (again && !this._beamRepeated) {
+            this._beamRepeated = true;
+            this.eyeBeamAttack();
+          } else {
+            this._beamRepeated = false;
+            this.suppressSide = false;
+            this.endAttack(1.4);
+          }
+        });
       });
     });
   }
@@ -575,7 +613,7 @@ export default class BossScene extends Phaser.Scene {
         this.spawnEnemyShot(Phaser.Math.Between(60, Math.floor(W * 0.6)), -30, Phaser.Math.Between(-30, 30), 190 + phase * 22, 'ticket');
       }
       this.sideClock -= dt;
-      if (this.sideClock <= 0) {
+      if (this.sideClock <= 0 && !this.suppressSide) {
         this.sideClock = phase >= 4 ? 3.2 : 4.5;
         const x = Phaser.Math.Clamp(Math.floor(this.player.x), 70, Math.floor(W * 0.64));
         this.warnings.push({ kind: 'col', x, life: 0.62, max: 0.62 });
@@ -635,20 +673,20 @@ export default class BossScene extends Phaser.Scene {
     const dt = Math.min(0.033, deltaMs / 1000);
     if (this.stateFlag === 'menu') return;
 
-    if (Phaser.Input.Keyboard.JustDown(this.keys.P) || Phaser.Input.Keyboard.JustDown(this.keys.ESC)) {
-      this.pauseBattle();
-      return;
-    }
-
+    // NOTE: pause is driven from a DOM keydown listener in main.js — some
+    // browsers swallow Escape before Phaser's keyboard plugin sees it.
     const input = {
       dx: Number(this.keys.RIGHT.isDown || this.keys.D.isDown) - Number(this.keys.LEFT.isDown || this.keys.A.isDown),
       dy: Number(this.keys.DOWN.isDown || this.keys.S.isDown) - Number(this.keys.UP.isDown || this.keys.W.isDown),
       fire: this.keys.Z.isDown || this.keys.J.isDown || this.keys.SPACE.isDown || this.input.activePointer.isDown,
       boost: this.keys.SHIFT.isDown || this.keys.K.isDown,
     };
-    if (Phaser.Input.Keyboard.JustDown(this.keys.X) || Phaser.Input.Keyboard.JustDown(this.keys.C) || Phaser.Input.Keyboard.JustDown(this.keys.L)) {
-      this.player.tryShield();
-    }
+    const shieldTapped = Phaser.Input.Keyboard.JustDown(this.keys.X)
+      || Phaser.Input.Keyboard.JustDown(this.keys.C)
+      || Phaser.Input.Keyboard.JustDown(this.keys.L)
+      || this.shieldRequested;
+    this.shieldRequested = false;
+    if (shieldTapped && this.stateFlag === 'play') this.player.tryShield();
 
     this.player.update(dt, this.stateFlag === 'play' ? input : { dx: 0, dy: 0, fire: false, boost: false });
     this.boss.update(dt);
@@ -763,8 +801,12 @@ export default class BossScene extends Phaser.Scene {
     this.beams = this.beams.filter(beam => {
       beam.life -= dt;
       if (beam.horizontal && beam.track) {
-        const dy = this.player.y - beam.y;
-        beam.y += Phaser.Math.Clamp(dy, -beam.track * dt, beam.track * dt);
+        // Grace period: the beam holds its telegraphed row before steering
+        if (beam.trackDelay > 0) beam.trackDelay -= dt;
+        else {
+          const dy = this.player.y - beam.y;
+          beam.y += Phaser.Math.Clamp(dy, -beam.track * dt, beam.track * dt);
+        }
       }
       if (this.stateFlag === 'play' && this.player.vulnerable) {
         let hit = false;
@@ -804,6 +846,10 @@ export default class BossScene extends Phaser.Scene {
     this.beams = [];
     this.warnings = [];
     this.boss.playAnim('damage');
+    // Fairness: surviving a phase refills all 3 shields
+    this.player.rechargeShields();
+    this.playSfx('shield', 1);
+    this.showHint('SHIELDS RECHARGED — 3 / 3');
     if (this.boss.enraged) {
       // ENRAGED: the Conductor burns red, the music speeds up, smoke turns red
       this.playSfx('enrage', 1);
@@ -827,6 +873,7 @@ export default class BossScene extends Phaser.Scene {
     this.playerBullets = []; this.enemyShots = []; this.beams = []; this.warnings = [];
     this.signalRed = false;
     this._beamRepeated = false;
+    this.suppressSide = false;
     this.time.removeAllEvents();
     this.tweens.killAll();
   }
@@ -867,7 +914,7 @@ export default class BossScene extends Phaser.Scene {
     document.querySelector('#result-title').textContent = won ? 'A KNOCKOUT!' : 'DERAILED';
     document.querySelector('#result-copy').textContent = won
       ? 'The Conductor slumps over his engine. The Infinity Train grinds to its final stop.'
-      : 'The Conductor punched your last ticket. The battle resets from the top — you get 3 shields for the whole fight, so save them for ticket walls, the eye beam and the vortex.';
+      : 'The Conductor punched your last ticket. The battle resets from the top — your 3 shields fully recharge every time you break a phase, so spend them freely on the vortex and anything you cannot outrun.';
     document.querySelector('#result').classList.remove('hidden');
   }
 
@@ -902,9 +949,35 @@ export default class BossScene extends Phaser.Scene {
         g.fillStyle(COLORS.pink, a * 0.22).fillRect(0, w.y, W, w.h);
         g.lineStyle(2, COLORS.pink, a).strokeRect(0, w.y, W, w.h);
       } else if (w.kind === 'beamwarn') {
+        // Charging: pulsing rings at the eye only — no row committed yet
         const e = this.boss.eyePos();
-        g.lineStyle(2, COLORS.green, a).strokeCircle(e.x, e.y, 26 + 18 * (w.life / w.max));
-        g.lineStyle(2, COLORS.green, a * 0.6).lineBetween(0, this.player.y, e.x, e.y);
+        g.lineStyle(3, COLORS.green, a).strokeCircle(e.x, e.y, 26 + 18 * (w.life / w.max));
+        g.lineStyle(2, COLORS.green, a * 0.5).strokeCircle(e.x, e.y, 40 + 26 * (w.life / w.max));
+      } else if (w.kind === 'beamlock') {
+        // Locked: the beam will fire EXACTLY inside this hollow corridor.
+        // Deliberately drawn as an OUTLINE (never a solid bar) so it can't be
+        // confused with the solid, lethal beam that follows.
+        const e = this.boss.eyePos();
+        g.lineStyle(2, COLORS.green, a).lineBetween(0, w.y - 17, e.x, w.y - 17);
+        g.lineStyle(2, COLORS.green, a).lineBetween(0, w.y + 17, e.x, w.y + 17);
+        // Dashed centre line
+        for (let x = 0; x < e.x; x += 34) {
+          g.lineStyle(2, COLORS.green, a * 0.7).lineBetween(x, w.y, x + 18, w.y);
+        }
+        g.lineStyle(3, COLORS.green, a).strokeCircle(e.x, w.y, 15);
+      } else if (w.kind === 'gapmark') {
+        // Safe-lane guide: dashed rails across the arena mark the gap edges,
+        // with chevrons at the spawn edge. Fly between the rails.
+        const top = w.y - w.h / 2;
+        const bot = w.y + w.h / 2;
+        for (let x = 0; x < W; x += 40) {
+          g.lineStyle(2, COLORS.yellow, a * 0.45).lineBetween(x, top, x + 22, top);
+          g.lineStyle(2, COLORS.yellow, a * 0.45).lineBetween(x, bot, x + 22, bot);
+        }
+        const cx = W - 40;
+        g.fillStyle(COLORS.yellow, a);
+        g.fillTriangle(cx, top, cx + 18, top - 13, cx + 18, top + 5);
+        g.fillTriangle(cx, bot, cx + 18, bot + 13, cx + 18, bot - 5);
       }
     });
 
