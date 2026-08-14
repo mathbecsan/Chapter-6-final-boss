@@ -11,7 +11,9 @@ Shapes & Beats)*.
 
 - **Move**: `WASD` / arrow keys
 - **Shoot**: hold `Z`, `SPACE`, `J`, or mouse click
-- **Shield**: `X` / `C` — 1.5 s of invulnerability, then a cooldown
+- **Shield**: `X` / `C` — 1.5 s of invulnerability. You carry **3 charges**, and
+  they **fully recharge every time you break a phase**
+- **Pause**: `ESC` / `P`
 - **Boost**: hold `SHIFT` — faster dodging, limited fuel that regenerates
 
 ## The fight
@@ -30,6 +32,19 @@ Shapes & Beats)*.
   (a sustained beam that tracks you vertically) · **coal flak** (lobbed chunks
   that burst mid-air). Phases 3–4 add ambient ticket rain and surprise signal
   strikes on top of the main attack — the shield is tuned to be used often.
+
+## Fairness rules
+
+Every lethal attack is telegraphed, and the telegraph is always drawn as an
+*outline* while the lethal version is *solid*:
+
+- **Ticket walls** leave a wide gap marked by yellow dashed rails running the
+  width of the arena — fly between the rails.
+- **The eye beam** charges (rings at the eye), then **locks** its row and shows
+  a hollow dashed corridor, fires exactly there, holds still for a beat, and
+  only then starts steering toward you.
+- While a beam attack is running, ambient signal lasers are suppressed, so two
+  beams never appear at once without warning.
 
 ## Run locally
 
