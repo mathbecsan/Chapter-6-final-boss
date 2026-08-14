@@ -41,10 +41,17 @@ document.querySelector('#quit').addEventListener('click', () => {
   window.__battleScene?.fullReset();
   document.querySelector('#menu').classList.remove('hidden');
 });
+// Pause / resume toggle. Handled at the DOM level because some browsers
+// swallow Escape before Phaser's keyboard plugin receives it.
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && !document.querySelector('#pause-overlay').classList.contains('hidden')) {
-    window.__resumeBattle?.();
-  }
+  if (e.key !== 'Escape' && e.key !== 'p' && e.key !== 'P') return;
+  const overlay = document.querySelector('#pause-overlay');
+  const menuOpen = !document.querySelector('#menu').classList.contains('hidden');
+  const resultOpen = !document.querySelector('#result').classList.contains('hidden');
+  if (menuOpen || resultOpen) return;
+  e.preventDefault();
+  if (overlay.classList.contains('hidden')) window.__pauseBattle?.();
+  else window.__resumeBattle?.();
 });
 
 document.querySelector('#start').addEventListener('click', () => {
